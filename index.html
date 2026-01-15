@@ -22,12 +22,13 @@
         .editable:hover { background: rgba(0,0,0,0.1); border-radius: 4px; cursor: pointer; padding: 0 2px; }
         .etd-danger { color: #ef4444 !important; font-weight: 900; animation: pulse 1s infinite; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-        #terminal-modal { transition: opacity 0.3s; }
+        /* Modal Transitions */
+        .modal-bg { transition: opacity 0.3s; }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 font-sans h-screen flex flex-col overflow-hidden">
 
-    <div id="terminal-modal" class="fixed inset-0 bg-slate-900/95 z-50 flex items-center justify-center backdrop-blur-sm">
+    <div id="terminal-modal" class="fixed inset-0 bg-slate-900/95 z-50 flex items-center justify-center backdrop-blur-sm modal-bg">
         <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-600 max-w-md w-full text-center">
             <h1 class="text-3xl font-bold text-red-500 mb-2">智能計泊位系統</h1>
             <p class="text-slate-400 mb-6">資料庫：Google Sheet 連線中</p>
@@ -35,13 +36,29 @@
         </div>
     </div>
 
+    <div id="map-modal" class="fixed inset-0 bg-black/90 z-50 hidden flex-col items-center justify-center backdrop-blur-md" onclick="closeMap()">
+        <div class="relative w-full max-w-4xl h-[80vh] flex flex-col items-center p-4">
+            <div class="w-full flex justify-between items-center mb-2 text-white">
+                <h2 class="text-xl font-bold">總站結構圖</h2>
+                <button onclick="closeMap()" class="bg-slate-700 px-3 py-1 rounded hover:bg-slate-600">關閉 X</button>
+            </div>
+            <img id="terminal-map-img" src="" alt="Terminal Layout" class="object-contain max-w-full max-h-full rounded-lg shadow-2xl bg-white">
+            <p class="text-slate-400 text-sm mt-2">點擊背景關閉</p>
+        </div>
+    </div>
+
     <header class="bg-slate-800 border-b border-slate-700 shrink-0">
         <div class="flex justify-between items-center p-3">
-            <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2">
                 <button onclick="showTerminalModal()" class="text-sm bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded border border-slate-600 flex items-center gap-2">
                     🔄 <span id="current-terminal-name" class="font-bold text-red-400">未選擇</span>
                 </button>
-                <div id="clock" class="font-mono text-lg bg-black/30 px-3 py-1 rounded text-green-400">00:00:00</div>
+                
+                <button id="btn-show-map" onclick="showMap()" class="hidden text-sm bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded border border-blue-400 items-center gap-1 shadow">
+                    🗺️ 結構圖
+                </button>
+
+                <div id="clock" class="font-mono text-lg bg-black/30 px-3 py-1 rounded text-green-400 hidden sm:block">00:00:00</div>
             </div>
             <div id="api-status" class="text-[10px] text-green-500">System Ready</div>
         </div>
@@ -73,10 +90,9 @@
 
     <script>
         // ================= 配置設定 =================
-        // 請確認此 URL 與你 Apps Script 的 URL 一致
+        // 請確保此處為已更新過 doGet 函數的 Apps Script URL
         const API_URL = "https://script.google.com/macros/s/AKfycbzRo6udEvwQEDun8MuCnwE4x6neIss47qMajyJu0FpJItW6EG_72ExxQvuzC8QN8VGF/exec";
         
-        // ★ 修改點 1: 不再寫死資料，改為空物件
         let SERVER_DB = {}; 
 
         // ================= 全域變數 =================
@@ -88,108 +104,53 @@
 
         // ================= 初始化 =================
         window.onload = async () => {
-            // ★ 修改點 2: 系統啟動時先從 Google Sheet 下載總站設定
             await fetchTerminalConfig();
-
             if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
             startClock();
         };
 
-        // ★ 修改點 3: 新增下載設定的函數
+        // ================= 資料載入邏輯 =================
         async function fetchTerminalConfig() {
             const listDiv = document.getElementById('terminal-list');
             listDiv.innerHTML = '<p class="text-yellow-400 animate-pulse">正在下載總站資料庫...</p>';
             
             try {
-                // 呼叫 API 取得 Config
                 const config = await callApi('GET', { op: 'get_config' });
-                SERVER_DB = config; // 將下載的資料存入全域變數
-                
-                // 資料下載完畢後，才渲染列表
+                SERVER_DB = config; 
                 renderTerminalList();
             } catch (e) {
-                listDiv.innerHTML = '<p class="text-red-500 font-bold">無法連接資料庫，請檢查網絡或 API。</p>';
+                listDiv.innerHTML = '<p class="text-red-500 font-bold">無法連接資料庫</p>';
                 console.error(e);
             }
         }
 
-        // ================= API 核心函數 =================
-        async function callApi(method, payload) {
-            const statusEl = document.getElementById('api-status');
-            statusEl.innerText = "Syncing...";
-            statusEl.className = "text-[10px] text-yellow-400 animate-pulse";
-
-            try {
-                if (method === 'GET') {
-                    // 根據 op 決定參數
-                    let url = `${API_URL}?op=${payload.op}`;
-                    if (payload.terminal_id) url += `&terminal_id=${payload.terminal_id}`;
-                    
-                    const res = await fetch(url);
-                    statusEl.innerText = "Data Loaded";
-                    statusEl.className = "text-[10px] text-green-500";
-                    return await res.json();
-                } else {
-                    await fetch(API_URL, {
-                        method: 'POST',
-                        mode: 'no-cors',
-                        headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify(payload)
-                    });
-                    statusEl.innerText = "Saved";
-                    statusEl.className = "text-[10px] text-green-500";
-                    return { status: 'success' };
-                }
-            } catch (e) {
-                console.error("API Error:", e);
-                statusEl.innerText = "Sync Error";
-                statusEl.className = "text-[10px] text-red-500 font-bold";
-                throw e; // 拋出錯誤讓外層處理
-            }
-        }
-
-        // ================= 介面渲染與資料載入 =================
-        function renderTerminalList() {
-            const list = document.getElementById('terminal-list');
-            list.innerHTML = '';
-            
-            // 檢查是否有資料
-            if (Object.keys(SERVER_DB).length === 0) {
-                list.innerHTML = '<p class="text-slate-400">資料庫中沒有總站資料 (Config Sheet 空白)</p>';
-                return;
-            }
-
-            for (let [key, data] of Object.entries(SERVER_DB)) {
-                const btn = document.createElement('button');
-                btn.className = "w-full bg-slate-700 hover:bg-slate-600 border border-slate-500 p-4 rounded-xl text-left flex justify-between items-center transition group";
-                btn.innerHTML = `<span class="font-bold text-lg group-hover:text-white">${data.name}</span><span class="bg-red-600 text-xs px-2 py-1 rounded text-white">進入 &rarr;</span>`;
-                btn.onclick = () => loadTerminal(key);
-                list.appendChild(btn);
-            }
-        }
-
-        // 下方的 loadTerminal, createBusCard 等函數保持不變，直接使用原本 v8 的代碼即可
-        // 只需要確保上面的 SERVER_DB 已經被正確替換掉
-        
-        // ... (將原本 v8 代碼中 loadTerminal 以下的所有函數完整保留貼在這裡) ...
-        
         async function loadTerminal(id) {
             if(Object.keys(activeTimers).length > 0 && !confirm("切換總站將清除當前操作，確定嗎？")) return;
             
             activeTimers = {};
             document.getElementById('monitor_list').innerHTML = `<p class="text-center text-yellow-400 py-10 animate-pulse">正在從 Google Sheet 載入...</p>`;
             currentTerminalId = id;
-            currentTerminalData = SERVER_DB[id]; // 這裡會讀取到剛剛下載的資料
+            currentTerminalData = SERVER_DB[id];
             capacities = {};
             busCount = 0;
 
             document.getElementById('current-terminal-name').innerText = currentTerminalData.name;
             document.getElementById('terminal-modal').style.display = 'none';
 
+            // ★ 地圖按鈕控制：如果該總站有設定 layout_img，則顯示按鈕
+            const mapBtn = document.getElementById('btn-show-map');
+            if (currentTerminalData.layout_img) {
+                mapBtn.classList.remove('hidden');
+                mapBtn.classList.add('flex');
+                document.getElementById('terminal-map-img').src = currentTerminalData.layout_img;
+            } else {
+                mapBtn.classList.add('hidden');
+                mapBtn.classList.remove('flex');
+            }
+
+            // 渲染佈局
             const container = document.getElementById('layout-container');
             container.innerHTML = '';
-            
-            // 渲染車坑 (Layout)
             currentTerminalData.layout.forEach(section => {
                 const secHtml = document.createElement('section');
                 secHtml.innerHTML = `<h2 class="text-lg font-bold mb-3 text-blue-400 font-mono border-l-4 border-blue-500 pl-2">${section.title}</h2>`;
@@ -217,36 +178,70 @@
             try {
                 const buses = await callApi('GET', { op: 'get_buses', terminal_id: id });
                 document.getElementById('monitor_list').innerHTML = '';
-                
                 buses.forEach(b => {
                     const numId = parseInt(b.id.replace('bus_', ''));
                     if (numId > busCount) busCount = numId;
-                    
                     createBusCard(b.id, b.plate, b.route, b.run_route, b.duty, b.driver, b.etd, b.bay_id, true);
-                    
                     if (b.status !== 'normal' && b.timer_end) {
                         const endTime = new Date(b.timer_end);
                         const now = new Date();
                         const diffMins = Math.ceil((endTime - now) / 60000);
-                        if (diffMins > 0) {
-                            startTimer(b.id, diffMins, b.status === 'meal' ? 'meal' : 'break', false);
-                        }
+                        if (diffMins > 0) startTimer(b.id, diffMins, b.status === 'meal' ? 'meal' : 'break', false);
                     }
                 });
                 if (buses.length === 0) document.getElementById('monitor_list').innerHTML = `<p id="empty_msg" class="text-slate-500 italic text-center py-10">暫無計時車輛</p>`;
+            } catch (e) { alert("無法連接資料庫"); }
+        }
+
+        // ================= 地圖功能 =================
+        function showMap() { document.getElementById('map-modal').classList.remove('hidden'); document.getElementById('map-modal').classList.add('flex'); }
+        function closeMap() { document.getElementById('map-modal').classList.add('hidden'); document.getElementById('map-modal').classList.remove('flex'); }
+
+        // ================= API 核心函數 =================
+        async function callApi(method, payload) {
+            const statusEl = document.getElementById('api-status');
+            statusEl.innerText = "Syncing...";
+            statusEl.className = "text-[10px] text-yellow-400 animate-pulse";
+            try {
+                if (method === 'GET') {
+                    let url = `${API_URL}?op=${payload.op}`;
+                    if (payload.terminal_id) url += `&terminal_id=${payload.terminal_id}`;
+                    const res = await fetch(url);
+                    statusEl.innerText = "Data Loaded";
+                    statusEl.className = "text-[10px] text-green-500";
+                    return await res.json();
+                } else {
+                    await fetch(API_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(payload) });
+                    statusEl.innerText = "Saved";
+                    statusEl.className = "text-[10px] text-green-500";
+                    return { status: 'success' };
+                }
             } catch (e) {
-                alert("無法連接資料庫，請檢查網絡");
+                console.error("API Error:", e);
+                statusEl.innerText = "Sync Error";
+                statusEl.className = "text-[10px] text-red-500 font-bold";
+                throw e;
             }
         }
+
+        // ================= 輔助功能與邏輯 (保留不變) =================
+        function renderTerminalList() {
+            const list = document.getElementById('terminal-list');
+            list.innerHTML = '';
+            if (Object.keys(SERVER_DB).length === 0) { list.innerHTML = '<p class="text-slate-400">資料庫中沒有總站資料</p>'; return; }
+            for (let [key, data] of Object.entries(SERVER_DB)) {
+                const btn = document.createElement('button');
+                btn.className = "w-full bg-slate-700 hover:bg-slate-600 border border-slate-500 p-4 rounded-xl text-left flex justify-between items-center transition group";
+                btn.innerHTML = `<span class="font-bold text-lg group-hover:text-white">${data.name}</span><span class="bg-red-600 text-xs px-2 py-1 rounded text-white">進入 &rarr;</span>`;
+                btn.onclick = () => loadTerminal(key);
+                list.appendChild(btn);
+            }
+        }
+        function showTerminalModal() { document.getElementById('terminal-modal').style.display = 'flex'; }
         
-        // ... (剩下的 createBusCard, submitBusForm, startTimer 等函數請保持 v8 原樣，無需變動) ...
-        
-        // 為了確保你能直接複製運行，這裡補充必要的輔助函數：
         function checkPlateExists(plate, excludeId = null) {
             const allBuses = document.querySelectorAll('.bus-card');
-            for (let bus of allBuses) {
-                if (bus.id !== excludeId && bus.dataset.plate === plate.toUpperCase()) return true;
-            }
+            for (let bus of allBuses) if (bus.id !== excludeId && bus.dataset.plate === plate.toUpperCase()) return true;
             return false;
         }
 
@@ -264,27 +259,15 @@
 
             busCount++;
             const id = `bus_${busCount}`;
-
             let targetId = currentTerminalData.default_parking;
-            outerLoop:
-            for (const section of currentTerminalData.layout) {
+            outerLoop: for (const section of currentTerminalData.layout) {
                 for (const bay of section.bays) {
-                    if (bay.routes && bay.routes.includes(run_route)) {
-                        targetId = bay.id;
-                        break outerLoop;
-                    }
+                    if (bay.routes && bay.routes.includes(run_route)) { targetId = bay.id; break outerLoop; }
                 }
             }
 
             createBusCard(id, plate, route, run_route, duty, driver, etd, targetId, false);
-
-            callApi('POST', {
-                action: 'add',
-                id: id, terminal_id: currentTerminalId, bay_id: targetId,
-                plate: plate, route: route, run_route: run_route,
-                duty: duty, driver: driver, etd: etd
-            });
-
+            callApi('POST', { action: 'add', id: id, terminal_id: currentTerminalId, bay_id: targetId, plate: plate, route: route, run_route: run_route, duty: duty, driver: driver, etd: etd });
             ['in_plate','in_duty','in_etd','in_run_route','in_driver'].forEach(i => document.getElementById(i).value = "");
         }
 
@@ -314,23 +297,17 @@
                         <button onclick="removeBus('${id}')" class="px-2 text-[9px] bg-slate-200 text-slate-600 py-1 rounded font-bold">出站</button>
                     </div>
                 </div>`;
-            
             const targetBay = document.getElementById(targetId);
-            if(targetBay) {
-                targetBay.querySelector('div').insertAdjacentHTML('beforeend', html);
-                updateCounts();
-            }
+            if(targetBay) { targetBay.querySelector('div').insertAdjacentHTML('beforeend', html); updateCounts(); }
         }
 
         function allowDrop(e) { e.preventDefault(); }
         function drag(e) { e.dataTransfer.setData("text", e.target.id); }
-        
         function drop(e) {
             e.preventDefault();
             const busId = e.dataTransfer.getData("text");
             let t = e.target;
             while (t && !capacities.hasOwnProperty(t.id)) t = t.parentElement;
-            
             if (t && capacities.hasOwnProperty(t.id)) { 
                 t.querySelector('div').appendChild(document.getElementById(busId)); 
                 updateCounts(); 
@@ -344,11 +321,9 @@
             const now = new Date();
             const finishDate = new Date(now.getTime() + mins * 60000);
             const finishStr = `${finishDate.getHours().toString().padStart(2,'0')}:${finishDate.getMinutes().toString().padStart(2,'0')}`;
-
             if (activeTimers[id]) clearInterval(activeTimers[id].interval);
             bus.className = `bus-card p-3 rounded shadow-lg ${type === 'meal' ? 'status-meal' : 'status-break'}`;
             document.getElementById(`${id}_finish_time`).innerText = `🔚 ${finishStr}`;
-
             let seconds = mins * 60;
             const updateUI = () => {
                 const m = Math.floor(seconds / 60), s = seconds % 60;
@@ -357,18 +332,12 @@
                 timerBox.classList.remove('hidden');
                 timerBox.innerText = `${typeText}: ${timeStr}`;
                 updateMonitor(id, typeText, timeStr, finishStr, seconds <= 0);
-                if (seconds <= 0) {
-                    clearInterval(activeTimers[id].interval);
-                    timerBox.innerText = "時間完成";
-                }
+                if (seconds <= 0) { clearInterval(activeTimers[id].interval); timerBox.innerText = "時間完成"; }
                 seconds--;
             };
             activeTimers[id] = { interval: setInterval(updateUI, 1000), plate: bus.dataset.plate, run: bus.dataset.run };
             updateUI();
-
-            if (syncToDb) {
-                callApi('POST', { action: 'update', id: id, status: type, timer_end: finishDate.toISOString() });
-            }
+            if (syncToDb) callApi('POST', { action: 'update', id: id, status: type, timer_end: finishDate.toISOString() });
         }
 
         function updateMonitor(id, type, timeStr, finishStr, isDone) {
@@ -381,28 +350,14 @@
                 document.getElementById('monitor_list').appendChild(item);
             }
             item.style.borderColor = type === '用膳' ? '#f97316' : '#a855f7';
-            item.innerHTML = `
-                <div class="flex justify-between font-black text-white">
-                    <span>${activeTimers[id].plate} (${activeTimers[id].run})</span>
-                    <span class="${isDone ? 'text-red-500 animate-pulse' : 'text-orange-400'} font-mono">${timeStr}</span>
-                </div>
-                <div class="flex justify-between items-center mt-1">
-                    <span class="text-[10px] text-slate-400 font-bold">${type}</span>
-                    <span class="text-[11px] bg-slate-800 px-2 py-0.5 rounded text-white border border-slate-600 font-mono">${finishStr}</span>
-                </div>`;
+            item.innerHTML = `<div class="flex justify-between font-black text-white"><span>${activeTimers[id].plate} (${activeTimers[id].run})</span><span class="${isDone ? 'text-red-500 animate-pulse' : 'text-orange-400'} font-mono">${timeStr}</span></div><div class="flex justify-between items-center mt-1"><span class="text-[10px] text-slate-400 font-bold">${type}</span><span class="text-[11px] bg-slate-800 px-2 py-0.5 rounded text-white border border-slate-600 font-mono">${finishStr}</span></div>`;
         }
 
         function removeBus(id, isAuto = false) {
             const bus = document.getElementById(id);
             if (!bus) return;
             if (!isAuto && !confirm(`確認車牌 ${bus.dataset.plate} 出站？`)) return;
-            
-            if (activeTimers[id]) {
-                clearInterval(activeTimers[id].interval);
-                const mon = document.getElementById(`mon_${id}`);
-                if (mon) mon.remove();
-                delete activeTimers[id];
-            }
+            if (activeTimers[id]) { clearInterval(activeTimers[id].interval); const mon = document.getElementById(`mon_${id}`); if (mon) mon.remove(); delete activeTimers[id]; }
             bus.remove();
             if (Object.keys(activeTimers).length === 0) document.getElementById('empty_msg').classList.remove('hidden');
             updateCounts();
@@ -417,25 +372,14 @@
                 newVal = prompt("修改車牌號碼:", bus.dataset.plate).toUpperCase().trim();
                 if (newVal && newVal !== bus.dataset.plate) {
                     if (checkPlateExists(newVal, id)) return alert("車牌重複！");
-                    bus.dataset.plate = newVal;
-                    document.getElementById(`${id}_plate_val`).innerText = newVal;
-                    if(activeTimers[id]) activeTimers[id].plate = newVal;
-                    updatePayload.plate = newVal;
+                    bus.dataset.plate = newVal; document.getElementById(`${id}_plate_val`).innerText = newVal; if(activeTimers[id]) activeTimers[id].plate = newVal; updatePayload.plate = newVal;
                 } else return;
             } else if (field === 'driver') {
                 newVal = prompt("修改車長編號:", bus.dataset.driver).trim();
-                if (newVal) {
-                    bus.dataset.driver = newVal;
-                    document.getElementById(`${id}_driver_val`).innerText = newVal;
-                    updatePayload.driver = newVal;
-                } else return;
+                if (newVal) { bus.dataset.driver = newVal; document.getElementById(`${id}_driver_val`).innerText = newVal; updatePayload.driver = newVal; } else return;
             } else if (field === 'etd') {
                 newVal = prompt("修改預計開車時間 (HH:mm):", bus.dataset.etd).trim();
-                if (newVal && /^([01]\d|2[0-3]):?([0-5]\d)$/.test(newVal)) {
-                    bus.dataset.etd = newVal;
-                    document.getElementById(`${id}_etd_val`).innerText = newVal;
-                    updatePayload.etd = newVal;
-                } else return;
+                if (newVal && /^([01]\d|2[0-3]):?([0-5]\d)$/.test(newVal)) { bus.dataset.etd = newVal; document.getElementById(`${id}_etd_val`).innerText = newVal; updatePayload.etd = newVal; } else return;
             }
             callApi('POST', updatePayload);
         }
@@ -452,8 +396,6 @@
             }
         }
 
-        function showTerminalModal() { document.getElementById('terminal-modal').style.display = 'flex'; }
-
         function startClock() {
             setInterval(() => {
                 const now = new Date();
@@ -467,10 +409,7 @@
                     const etdDate = new Date(); etdDate.setHours(h, m, 0);
                     const diff = (etdDate - now) / 60000;
                     const etdDisplay = document.getElementById(`${bus.id}_etd_val`);
-                    if (etdDisplay) {
-                        if (diff > 0 && diff <= 5) etdDisplay.classList.add('etd-danger');
-                        else etdDisplay.classList.remove('etd-danger');
-                    }
+                    if (etdDisplay) { if (diff > 0 && diff <= 5) etdDisplay.classList.add('etd-danger'); else etdDisplay.classList.remove('etd-danger'); }
                 });
             }, 1000);
         }
