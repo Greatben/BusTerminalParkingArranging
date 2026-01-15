@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>廣田邨總站調度系統 v7</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .bay-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+        .bus-card { cursor: grab; transition: all 0.2s; border-left-width: 6px; color: #000000 !important; }
+        .bus-card:active { cursor: grabbing; }
+        .status-meal { background-color: #fff7ed; border-left-color: #f97316; }
+        .status-break { background-color: #faf5ff; border-left-color: #a855f7; }
+        .status-normal { background-color: #ffffff; border-left-color: #64748b; }
+        .editable:hover { background: rgba(0,0,0,0.1); border-radius: 4px; cursor: pointer; padding: 0 2px; }
+        .etd-danger { color: #ef4444 !important; font-weight: 900; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 p-4 font-sans">
+
+    <header class="mb-6 border-b border-slate-700 pb-6">
+        <div class="flex justify-between items-start">
+            <h1 class="text-2xl font-bold text-red-500 mb-4">KMB 藍田廣田邨總站調度系統 v7</h1>
+            <div id="clock" class="text-xl font-mono bg-slate-800 px-4 py-2 rounded border border-slate-600">00:00:00</div>
+        </div>
+        
+        <div class="bg-slate-800 p-4 rounded-xl border border-slate-600 shadow-inner mt-4">
+            <div class="flex flex-wrap gap-3 items-end text-white">
+                <div class="w-32">
+                    <label class="block text-[10px] mb-1 text-slate-300">車牌</label>
+                    <input type="text" id="in_plate" placeholder="TV1234" class="w-full bg-slate-700 border border-slate-500 rounded px-2 py-1.5 uppercase">
+                </div>
+                <div class="w-20">
+                    <label class="block text-[10px] mb-1 text-slate-300">路線</label>
+                    <input type="text" id="in_route" placeholder="16" class="w-full bg-slate-700 border border-slate-500 rounded px-2 py-1.5 text-center uppercase">
+                </div>
+                <div class="w-20">
+                    <label class="block text-[10px] mb-1 text-slate-300">字軌</label>
+                    <input type="text" id="in_duty" placeholder="01" class="w-full bg-slate-700 border border-slate-500 rounded px-2 py-1.5 text-center uppercase">
+                </div>
+                <div class="w-32">
+                    <label class="block text-[10px] mb-1 text-slate-300">行走路線</label>
+                    <input type="text" id="in_run_route" placeholder="預設同路線" class="w-full bg-slate-700 border border-slate-500 rounded px-2 py-1.5 text-center uppercase">
+                </div>
+                <div class="w-24">
+                    <label class="block text-[10px] mb-1 text-slate-300">車長編號</label>
+                    <input type="text" id="in_driver" placeholder="S12345" class="w-full bg-slate-700 border border-slate-500 rounded px-2 py-1.5 text-center">
+                </div>
+                <div class="w-28">
+                    <label class="block text-[10px] mb-1 text-slate-300">預計開車</label>
+                    <input type="time" id="in_etd" class="w-full bg-slate-700 border border-slate-500 rounded px-2 py-1">
+                </div>
+                <button onclick="submitBusForm()" class="bg-red-600 hover:bg-red-700 text-white px-6 py-1.5 rounded font-bold shadow-lg transition">加入調度板</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="grid grid-cols-12 gap-6">
+        <div class="col-span-9 space-y-8">
+            <section>
+                <h2 class="text-lg font-bold mb-3 text-blue-400 font-mono">OPERATIONAL BAYS / 營運車坑</h2>
+                <div class="bay-grid">
+                    <div id="bay_14B" class="bg-slate-800 p-4 rounded-xl border-2 border-slate-700" ondrop="drop(event)" ondragover="allowDrop(event)"><h3 class="font-bold mb-3 text-slate-300 text-sm border-b border-slate-700 pb-1">14B 坑 (0/3)</h3><div class="space-y-3 min-h-[120px]"></div></div>
+                    <div id="bay_215X" class="bg-slate-800 p-4 rounded-xl border-2 border-slate-700" ondrop="drop(event)" ondragover="allowDrop(event)"><h3 class="font-bold mb-3 text-slate-300 text-sm border-b border-slate-700 pb-1">215X 坑 (0/3)</h3><div class="space-y-3 min-h-[120px]"></div></div>
+                    <div id="bay_16L" class="bg-slate-800 p-4 rounded-xl border-2 border-slate-700" ondrop="drop(event)" ondragover="allowDrop(event)"><h3 class="font-bold mb-3 text-slate-300 text-sm border-b border-slate-700 pb-1">16 孖坑(左) (0/3)</h3><div class="space-y-3 min-h-[120px]"></div></div>
+                    <div id="bay_16R" class="bg-slate-800 p-4 rounded-xl border-2 border-slate-700" ondrop="drop(event)" ondragover="allowDrop(event)"><h3 class="font-bold mb-3 text-slate-300 text-sm border-b border-slate-700 pb-1">16 孖坑(右) (0/3)</h3><div class="space-y-3 min-h-[120px]"></div></div>
+                </div>
+            </section>
+            
+            <section>
+                <h2 class="text-lg font-bold mb-3 text-emerald-400 font-mono">PARKING AREA / 泊位</h2>
+                <div class="bay-grid">
+                    <div id="park_mountain" class="bg-slate-800 p-4 rounded-xl border-2 border-slate-700" ondrop="drop(event)" ondragover="allowDrop(event)"><h3 class="font-bold mb-3 text-slate-300 text-sm">山邊通道 (0/4)</h3><div class="space-y-3 min-h-[100px]"></div></div>
+                    <div id="park_14B_back" class="bg-slate-800 p-4 rounded-xl border-2 border-slate-700" ondrop="drop(event)" ondragover="allowDrop(event)"><h3 class="font-bold mb-3 text-slate-300 text-sm">14B 後凹位 (0/2)</h3><div class="space-y-3 min-h-[100px]"></div></div>
+                    <div id="park_narrow" class="bg-slate-800 p-4 rounded-xl border-2 border-slate-700" ondrop="drop(event)" ondragover="allowDrop(event)"><h3 class="font-bold mb-3 text-slate-300 text-sm">窄角位 (0/1)</h3><div class="space-y-3 min-h-[100px]"></div></div>
+                    <div id="park_office" class="bg-slate-800 p-4 rounded-xl border-2 border-slate-700" ondrop="drop(event)" ondragover="allowDrop(event)"><h3 class="font-bold mb-3 text-slate-300 text-sm">站長室對開 (0/2)</h3><div class="space-y-3 min-h-[100px]"></div></div>
+                </div>
+            </section>
+        </div>
+
+        <div class="col-span-3">
+            <div class="bg-slate-800 p-5 rounded-2xl shadow-2xl sticky top-4 border border-slate-700 min-h-[80vh]">
+                <h2 class="text-xl font-bold mb-4 flex items-center text-orange-400 border-b border-slate-700 pb-2">🕒 狀態監控</h2>
+                <div id="monitor_list" class="space-y-3 text-sm">
+                    <p id="empty_msg" class="text-slate-500 italic text-center py-10">暫無計時車輛</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let busCount = 0;
+        let activeTimers = {};
+        const capacities = { 'bay_14B': 3, 'bay_215X': 3, 'bay_16L': 3, 'bay_16R': 3, 'park_mountain': 4, 'park_14B_back': 2, 'park_narrow': 1, 'park_office': 2 };
+
+        // 時鐘與自動檢查系統
+        setInterval(() => {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('zh-HK', { hour12: false });
+            const shortTime = timeStr.substring(0, 5); 
+            document.getElementById('clock').innerText = timeStr;
+
+            document.querySelectorAll('.bus-card').forEach(bus => {
+                const etd = bus.dataset.etd;
+                if (etd !== "--:--" && etd === shortTime) removeBus(bus.id, true);
+                
+                const [h, m] = etd.split(':').map(Number);
+                const etdDate = new Date(); etdDate.setHours(h, m, 0);
+                const diff = (etdDate - now) / 60000;
+                const etdDisplay = document.getElementById(`${bus.id}_etd_val`);
+                if (etdDisplay) {
+                    if (diff > 0 && diff <= 5) etdDisplay.classList.add('etd-danger');
+                    else etdDisplay.classList.remove('etd-danger');
+                }
+            });
+        }, 1000);
+
+        function checkPlateExists(plate, excludeId = null) {
+            const allBuses = document.querySelectorAll('.bus-card');
+            for (let bus of allBuses) {
+                if (bus.id !== excludeId && bus.dataset.plate === plate.toUpperCase()) return true;
+            }
+            return false;
+        }
+
+        function submitBusForm() {
+            const plate = document.getElementById('in_plate').value.toUpperCase().trim();
+            const route = document.getElementById('in_route').value.toUpperCase().trim();
+            const duty = document.getElementById('in_duty').value.toUpperCase().trim();
+            const run_route = document.getElementById('in_run_route').value.toUpperCase().trim() || route;
+            const driver = document.getElementById('in_driver').value.trim();
+            const etd = document.getElementById('in_etd').value || "--:--";
+
+            if (!plate) return alert("請輸入車牌");
+
+            // 3) 加入時檢查重複
+            if (checkPlateExists(plate)) {
+                alert(`⚠️ 警告：車牌 ${plate} 目前已在站內，請先將舊卡片出站！`);
+                return;
+            }
+
+            busCount++;
+            const id = `bus_${busCount}`;
+            createBusCard(id, plate, route, run_route, duty, driver, etd);
+            
+            ['in_plate','in_duty','in_etd','in_run_route','in_driver','in_route'].forEach(i => document.getElementById(i).value = "");
+        }
+
+        function createBusCard(id, plate, route, run_route, duty, driver, etd) {
+            const html = `
+                <div id="${id}" draggable="true" ondragstart="drag(event)" class="bus-card status-normal p-3 rounded shadow-lg" 
+                     data-plate="${plate}" data-route="${route}" data-run="${run_route}" data-duty="${duty}" data-driver="${driver}" data-etd="${etd}">
+                    <div class="flex justify-between items-start mb-1">
+                        <div class="font-black text-xl tracking-tight editable" onclick="editField('${id}', 'plate')">
+                             <span id="${id}_plate_val">${plate}</span>
+                        </div>
+                        <div class="text-right">
+                            <div class="bg-red-600 text-white px-2 py-0.5 rounded text-[11px] font-black italic">行:${run_route}</div>
+                            <div class="text-[9px] font-bold text-slate-500 mt-0.5">線:${route}</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1 text-[10px] font-bold mb-2 text-slate-700 border-b border-slate-100 pb-1">
+                        <span>字軌: ${duty}</span> 
+                        <span class="editable" onclick="editField('${id}', 'driver')">車長: <span id="${id}_driver_val">${driver}</span></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-[10px] font-bold text-slate-500 editable" onclick="editField('${id}', 'etd')">
+                            開車: <span id="${id}_etd_val" class="text-blue-700">${etd}</span>
+                        </span>
+                        <div id="${id}_finish_time" class="text-[10px] font-black text-red-600"></div>
+                    </div>
+                    <div id="${id}_timer_box" class="hidden mt-2 text-center text-[11px] font-black py-1 rounded bg-black/5"></div>
+                    <div class="mt-2 flex gap-1">
+                        <button onclick="startTimer('${id}', 60, 'meal')" class="flex-1 text-[9px] bg-orange-500 text-white py-1 rounded font-bold">用膳</button>
+                        <button onclick="startTimer('${id}', 40, 'break')" class="flex-1 text-[9px] bg-purple-500 text-white py-1 rounded font-bold">小休</button>
+                        <button onclick="removeBus('${id}')" class="px-2 text-[9px] bg-slate-200 text-slate-600 py-1 rounded font-bold">出站</button>
+                    </div>
+                </div>`;
+
+            let targetId = 'park_mountain';
+            if (run_route === '14B') targetId = 'bay_14B';
+            else if (run_route === '215X') targetId = 'bay_215X';
+            else if (run_route === '16') targetId = 'bay_16L';
+
+            document.getElementById(targetId).querySelector('div').insertAdjacentHTML('beforeend', html);
+            updateCounts();
+        }
+
+        function editField(id, field) {
+            const bus = document.getElementById(id);
+            if (field === 'plate') {
+                const newVal = prompt("修改車牌號碼:", bus.dataset.plate).toUpperCase().trim();
+                if (newVal && newVal !== bus.dataset.plate) {
+                    // 2) 修改時檢查重複
+                    if (checkPlateExists(newVal, id)) {
+                        alert(`⚠️ 警告：車牌 ${newVal} 已在其他位置出現！Are you on9?`);
+                    } else {
+                        bus.dataset.plate = newVal;
+                        document.getElementById(`${id}_plate_val`).innerText = newVal;
+                        if (activeTimers[id]) activeTimers[id].plate = newVal;
+                    }
+                }
+            } else if (field === 'driver') {
+                const newVal = prompt("修改車長編號:", bus.dataset.driver).trim();
+                if (newVal !== null) {
+                    bus.dataset.driver = newVal;
+                    document.getElementById(`${id}_driver_val`).innerText = newVal;
+                }
+            } else if (field === 'etd') {
+                const newVal = prompt("修改預計開車時間 (HH:mm):", bus.dataset.etd).trim();
+                if (newVal !== null && /^([01]\d|2[0-3]):?([0-5]\d)$/.test(newVal)) {
+                    bus.dataset.etd = newVal;
+                    document.getElementById(`${id}_etd_val`).innerText = newVal;
+                }
+            }
+        }
+
+        function startTimer(id, mins, type) {
+            const bus = document.getElementById(id);
+            const typeText = type === 'meal' ? '用膳' : '小休';
+            const now = new Date();
+            const finishDate = new Date(now.getTime() + mins * 60000);
+            const finishStr = `${finishDate.getHours().toString().padStart(2,'0')}:${finishDate.getMinutes().toString().padStart(2,'0')}`;
+
+            if (activeTimers[id]) clearInterval(activeTimers[id].interval);
+            bus.className = `bus-card p-3 rounded shadow-lg ${type === 'meal' ? 'status-meal' : 'status-break'}`;
+            document.getElementById(`${id}_finish_time`).innerText = `🔚 ${finishStr}`;
+
+            let seconds = mins * 60;
+            const updateUI = () => {
+                const m = Math.floor(seconds / 60), s = seconds % 60;
+                const timeStr = `${m}:${s < 10 ? '0' : ''}${s}`;
+                const timerBox = document.getElementById(id + '_timer_box');
+                timerBox.classList.remove('hidden');
+                timerBox.innerText = `${typeText}: ${timeStr}`;
+                updateMonitor(id, typeText, timeStr, finishStr, seconds <= 0);
+                if (seconds <= 0) {
+                    clearInterval(activeTimers[id].interval);
+                    timerBox.innerText = "時間完成";
+                }
+                seconds--;
+            };
+            activeTimers[id] = { interval: setInterval(updateUI, 1000), plate: bus.dataset.plate, run: bus.dataset.run };
+            updateUI();
+        }
+
+        function updateMonitor(id, type, timeStr, finishStr, isDone) {
+            document.getElementById('empty_msg').classList.add('hidden');
+            let item = document.getElementById(`mon_${id}`);
+            if (!item) {
+                item = document.createElement('div');
+                item.id = `mon_${id}`;
+                item.className = "bg-slate-700 p-3 rounded border-l-4 mb-2 shadow transition-all";
+                document.getElementById('monitor_list').appendChild(item);
+            }
+            item.style.borderColor = type === '用膳' ? '#f97316' : '#a855f7';
+            item.innerHTML = `
+                <div class="flex justify-between font-black text-white">
+                    <span>${activeTimers[id].plate} (${activeTimers[id].run})</span>
+                    <span class="${isDone ? 'text-red-500 animate-pulse' : 'text-orange-400'} font-mono">${timeStr}</span>
+                </div>
+                <div class="flex justify-between items-center mt-1">
+                    <span class="text-[10px] text-slate-400 font-bold">${type}</span>
+                    <span class="text-[11px] bg-slate-800 px-2 py-0.5 rounded text-white border border-slate-600 font-mono">${finishStr}</span>
+                </div>`;
+        }
+
+        function removeBus(id, isAuto = false) {
+            const bus = document.getElementById(id);
+            if (!bus) return;
+            if (!isAuto && !confirm(`確認車牌 ${bus.dataset.plate} 出站？`)) return;
+            
+            if (activeTimers[id]) clearInterval(activeTimers[id].interval);
+            const mon = document.getElementById(`mon_${id}`);
+            if (mon) mon.remove();
+            delete activeTimers[id];
+            bus.remove();
+            
+            if (Object.keys(activeTimers).length === 0) document.getElementById('empty_msg').classList.remove('hidden');
+            updateCounts();
+        }
+
+        function allowDrop(e) { e.preventDefault(); }
+        function drag(e) { e.dataTransfer.setData("text", e.target.id); }
+        function drop(e) {
+            e.preventDefault();
+            const data = e.dataTransfer.getData("text");
+            let t = e.target;
+            while (t && !capacities.hasOwnProperty(t.id)) t = t.parentElement;
+            if (t && capacities.hasOwnProperty(t.id)) { 
+                t.querySelector('div').appendChild(document.getElementById(data)); 
+                updateCounts(); 
+            }
+        }
+        function updateCounts() {
+            for (let id in capacities) {
+                const el = document.getElementById(id);
+                if (!el) continue;
+                const count = el.querySelector('div').children.length;
+                const h3 = el.querySelector('h3');
+                h3.innerText = h3.innerText.split(' (')[0] + ` (${count}/${capacities[id]})`;
+                el.classList.toggle('bg-red-900/20', count > capacities[id] && capacities[id] > 0);
+                el.classList.toggle('border-red-500', count > capacities[id] && capacities[id] > 0);
+            }
+        }
+    </script>
+</body>
+</html>
