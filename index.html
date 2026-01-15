@@ -73,44 +73,11 @@
 
     <script>
         // ================= 配置設定 =================
+        // 請確認此 URL 與你 Apps Script 的 URL 一致
         const API_URL = "https://script.google.com/macros/s/AKfycbzRo6udEvwQEDun8MuCnwE4x6neIss47qMajyJu0FpJItW6EG_72ExxQvuzC8QN8VGF/exec";
         
-        // 總站佈局設定 (前端設定)
-        const SERVER_DB = {
-            "kt_kwongtin": {
-                name: "藍田廣田邨總站",
-                default_parking: "park_mountain",
-                layout: [
-                    { title: "營運車坑", bays: [
-                        { id: "bay_14B", name: "14B 坑", cap: 3, type: "route", routes: ["14B"] },
-                        { id: "bay_215X", name: "215X 坑", cap: 3, type: "route", routes: ["215X"] },
-                        { id: "bay_16L", name: "16 孖坑(左)", cap: 3, type: "route", routes: ["16"] },
-                        { id: "bay_16R", name: "16 孖坑(右)", cap: 3, type: "route", routes: [] },
-                        { id: "bay_216M", name: "216M 通道", cap: 0, type: "no_parking", routes: [] }
-                    ]},
-                    { title: "臨時泊位", bays: [
-                        { id: "park_mountain", name: "山邊通道", cap: 4, type: "park", routes: [] },
-                        { id: "park_14B_back", name: "14B 後凹位", cap: 2, type: "park", routes: [] },
-                        { id: "park_narrow", name: "窄角位", cap: 1, type: "park", routes: [] },
-                        { id: "park_office", name: "站長室對開", cap: 2, type: "park", routes: [] }
-                    ]}
-                ]
-            },
-            "tm_central": {
-                name: "屯門市中心總站 (Demo)",
-                default_parking: "park_middle",
-                layout: [
-                    { title: "九龍方向", bays: [
-                        { id: "bay_60x", name: "60X", cap: 5, type: "route", routes: ["60X"] },
-                        { id: "bay_61x", name: "61X", cap: 4, type: "route", routes: ["61X"] },
-                        { id: "bay_62x", name: "62X", cap: 4, type: "route", routes: ["62X"] }
-                    ]},
-                    { title: "泊車區", bays: [
-                        { id: "park_middle", name: "中間泊位", cap: 10, type: "park", routes: [] }
-                    ]}
-                ]
-            }
-        };
+        // ★ 修改點 1: 不再寫死資料，改為空物件
+        let SERVER_DB = {}; 
 
         // ================= 全域變數 =================
         let currentTerminalId = null;
@@ -120,11 +87,31 @@
         let capacities = {};
 
         // ================= 初始化 =================
-        window.onload = () => {
-            renderTerminalList();
+        window.onload = async () => {
+            // ★ 修改點 2: 系統啟動時先從 Google Sheet 下載總站設定
+            await fetchTerminalConfig();
+
             if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
             startClock();
         };
+
+        // ★ 修改點 3: 新增下載設定的函數
+        async function fetchTerminalConfig() {
+            const listDiv = document.getElementById('terminal-list');
+            listDiv.innerHTML = '<p class="text-yellow-400 animate-pulse">正在下載總站資料庫...</p>';
+            
+            try {
+                // 呼叫 API 取得 Config
+                const config = await callApi('GET', { op: 'get_config' });
+                SERVER_DB = config; // 將下載的資料存入全域變數
+                
+                // 資料下載完畢後，才渲染列表
+                renderTerminalList();
+            } catch (e) {
+                listDiv.innerHTML = '<p class="text-red-500 font-bold">無法連接資料庫，請檢查網絡或 API。</p>';
+                console.error(e);
+            }
+        }
 
         // ================= API 核心函數 =================
         async function callApi(method, payload) {
@@ -134,12 +121,15 @@
 
             try {
                 if (method === 'GET') {
-                    const res = await fetch(`${API_URL}?op=${payload.op}&terminal_id=${payload.terminal_id}`);
+                    // 根據 op 決定參數
+                    let url = `${API_URL}?op=${payload.op}`;
+                    if (payload.terminal_id) url += `&terminal_id=${payload.terminal_id}`;
+                    
+                    const res = await fetch(url);
                     statusEl.innerText = "Data Loaded";
                     statusEl.className = "text-[10px] text-green-500";
                     return await res.json();
                 } else {
-                    // Google Apps Script POST 使用 no-cors 模式
                     await fetch(API_URL, {
                         method: 'POST',
                         mode: 'no-cors',
@@ -154,6 +144,7 @@
                 console.error("API Error:", e);
                 statusEl.innerText = "Sync Error";
                 statusEl.className = "text-[10px] text-red-500 font-bold";
+                throw e; // 拋出錯誤讓外層處理
             }
         }
 
@@ -161,6 +152,13 @@
         function renderTerminalList() {
             const list = document.getElementById('terminal-list');
             list.innerHTML = '';
+            
+            // 檢查是否有資料
+            if (Object.keys(SERVER_DB).length === 0) {
+                list.innerHTML = '<p class="text-slate-400">資料庫中沒有總站資料 (Config Sheet 空白)</p>';
+                return;
+            }
+
             for (let [key, data] of Object.entries(SERVER_DB)) {
                 const btn = document.createElement('button');
                 btn.className = "w-full bg-slate-700 hover:bg-slate-600 border border-slate-500 p-4 rounded-xl text-left flex justify-between items-center transition group";
@@ -170,23 +168,28 @@
             }
         }
 
+        // 下方的 loadTerminal, createBusCard 等函數保持不變，直接使用原本 v8 的代碼即可
+        // 只需要確保上面的 SERVER_DB 已經被正確替換掉
+        
+        // ... (將原本 v8 代碼中 loadTerminal 以下的所有函數完整保留貼在這裡) ...
+        
         async function loadTerminal(id) {
             if(Object.keys(activeTimers).length > 0 && !confirm("切換總站將清除當前操作，確定嗎？")) return;
             
-            // 重置
             activeTimers = {};
             document.getElementById('monitor_list').innerHTML = `<p class="text-center text-yellow-400 py-10 animate-pulse">正在從 Google Sheet 載入...</p>`;
             currentTerminalId = id;
-            currentTerminalData = SERVER_DB[id];
+            currentTerminalData = SERVER_DB[id]; // 這裡會讀取到剛剛下載的資料
             capacities = {};
             busCount = 0;
 
             document.getElementById('current-terminal-name').innerText = currentTerminalData.name;
             document.getElementById('terminal-modal').style.display = 'none';
 
-            // 1. 渲染車坑
             const container = document.getElementById('layout-container');
             container.innerHTML = '';
+            
+            // 渲染車坑 (Layout)
             currentTerminalData.layout.forEach(section => {
                 const secHtml = document.createElement('section');
                 secHtml.innerHTML = `<h2 class="text-lg font-bold mb-3 text-blue-400 font-mono border-l-4 border-blue-500 pl-2">${section.title}</h2>`;
@@ -210,18 +213,17 @@
                 container.appendChild(secHtml);
             });
 
-            // 2. 從 API 載入車輛
+            // 載入車輛
             try {
                 const buses = await callApi('GET', { op: 'get_buses', terminal_id: id });
                 document.getElementById('monitor_list').innerHTML = '';
                 
                 buses.forEach(b => {
                     const numId = parseInt(b.id.replace('bus_', ''));
-                    if (numId > busCount) busCount = numId; // 同步 ID 計數
+                    if (numId > busCount) busCount = numId;
                     
                     createBusCard(b.id, b.plate, b.route, b.run_route, b.duty, b.driver, b.etd, b.bay_id, true);
                     
-                    // 恢復計時器
                     if (b.status !== 'normal' && b.timer_end) {
                         const endTime = new Date(b.timer_end);
                         const now = new Date();
@@ -236,8 +238,10 @@
                 alert("無法連接資料庫，請檢查網絡");
             }
         }
-
-        // ================= 巴士操作邏輯 =================
+        
+        // ... (剩下的 createBusCard, submitBusForm, startTimer 等函數請保持 v8 原樣，無需變動) ...
+        
+        // 為了確保你能直接複製運行，這裡補充必要的輔助函數：
         function checkPlateExists(plate, excludeId = null) {
             const allBuses = document.querySelectorAll('.bus-card');
             for (let bus of allBuses) {
@@ -261,7 +265,6 @@
             busCount++;
             const id = `bus_${busCount}`;
 
-            // 智能分流
             let targetId = currentTerminalData.default_parking;
             outerLoop:
             for (const section of currentTerminalData.layout) {
@@ -273,10 +276,8 @@
                 }
             }
 
-            // 1. 畫面建立 (Optimistic UI)
             createBusCard(id, plate, route, run_route, duty, driver, etd, targetId, false);
 
-            // 2. 背景寫入 DB
             callApi('POST', {
                 action: 'add',
                 id: id, terminal_id: currentTerminalId, bay_id: targetId,
@@ -321,7 +322,6 @@
             }
         }
 
-        // ================= 拖放與事件 =================
         function allowDrop(e) { e.preventDefault(); }
         function drag(e) { e.dataTransfer.setData("text", e.target.id); }
         
@@ -334,7 +334,6 @@
             if (t && capacities.hasOwnProperty(t.id)) { 
                 t.querySelector('div').appendChild(document.getElementById(busId)); 
                 updateCounts(); 
-                // DB Update
                 callApi('POST', { action: 'update', id: busId, bay_id: t.id });
             }
         }
@@ -407,8 +406,6 @@
             bus.remove();
             if (Object.keys(activeTimers).length === 0) document.getElementById('empty_msg').classList.remove('hidden');
             updateCounts();
-            
-            // DB Delete
             callApi('POST', { action: 'delete', id: id });
         }
 
@@ -416,7 +413,6 @@
             const bus = document.getElementById(id);
             let newVal;
             let updatePayload = { action: 'update', id: id };
-
             if (field === 'plate') {
                 newVal = prompt("修改車牌號碼:", bus.dataset.plate).toUpperCase().trim();
                 if (newVal && newVal !== bus.dataset.plate) {
@@ -441,7 +437,6 @@
                     updatePayload.etd = newVal;
                 } else return;
             }
-            // DB Update
             callApi('POST', updatePayload);
         }
 
