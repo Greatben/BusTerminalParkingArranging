@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>KMB 智能調度系統 PWA</title>
+    <title>KMB 智能調度系統 (Google Sheet版)</title>
     
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0f172a">
@@ -12,22 +12,16 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* PWA 優化：防止下拉刷新干擾拖放 */
         body { overscroll-behavior-y: contain; touch-action: pan-y; }
-        
         .bay-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
         .bus-card { cursor: grab; transition: all 0.2s; border-left-width: 6px; color: #000000 !important; position: relative; touch-action: none; }
         .bus-card:active { cursor: grabbing; transform: scale(1.02); }
-        
         .status-meal { background-color: #fff7ed; border-left-color: #f97316; }
         .status-break { background-color: #faf5ff; border-left-color: #a855f7; }
         .status-normal { background-color: #ffffff; border-left-color: #64748b; }
-        
         .editable:hover { background: rgba(0,0,0,0.1); border-radius: 4px; cursor: pointer; padding: 0 2px; }
         .etd-danger { color: #ef4444 !important; font-weight: 900; animation: pulse 1s infinite; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-
-        /* 模態視窗過場 */
         #terminal-modal { transition: opacity 0.3s; }
     </style>
 </head>
@@ -36,9 +30,8 @@
     <div id="terminal-modal" class="fixed inset-0 bg-slate-900/95 z-50 flex items-center justify-center backdrop-blur-sm">
         <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-600 max-w-md w-full text-center">
             <h1 class="text-3xl font-bold text-red-500 mb-2">KMB 調度系統</h1>
-            <p class="text-slate-400 mb-6">請選擇登入的總站 (Select Terminal)</p>
-            <div id="terminal-list" class="space-y-3">
-                </div>
+            <p class="text-slate-400 mb-6">資料庫：Google Sheet 連線中</p>
+            <div id="terminal-list" class="space-y-3"></div>
         </div>
     </div>
 
@@ -50,7 +43,7 @@
                 </button>
                 <div id="clock" class="font-mono text-lg bg-black/30 px-3 py-1 rounded text-green-400">00:00:00</div>
             </div>
-            <div id="pwa-status" class="text-[10px] text-slate-500">System Ready</div>
+            <div id="api-status" class="text-[10px] text-green-500">System Ready</div>
         </div>
         
         <div class="p-3 bg-slate-800/50 shadow-inner overflow-x-auto">
@@ -67,9 +60,7 @@
     </header>
 
     <main class="flex-1 overflow-hidden grid grid-cols-12">
-        <div id="layout-container" class="col-span-9 p-4 overflow-y-auto space-y-6 pb-20">
-            </div>
-
+        <div id="layout-container" class="col-span-9 p-4 overflow-y-auto space-y-6 pb-20"></div>
         <div class="col-span-3 bg-slate-800 border-l border-slate-700 p-4 overflow-y-auto">
             <h2 class="text-lg font-bold mb-4 flex items-center text-orange-400 border-b border-slate-700 pb-2 sticky top-0 bg-slate-800 z-10">
                 🕒 狀態監控
@@ -81,21 +72,23 @@
     </main>
 
     <script>
-        // --- 1. 模擬 Server Side 資料庫 (JSON) ---
+        // ================= 配置設定 =================
+        const API_URL = "https://script.google.com/macros/s/AKfycbzRo6udEvwQEDun8MuCnwE4x6neIss47qMajyJu0FpJItW6EG_72ExxQvuzC8QN8VGF/exec";
+        
+        // 總站佈局設定 (前端設定)
         const SERVER_DB = {
             "kt_kwongtin": {
                 name: "藍田廣田邨總站",
-                // 用於自動分流的邏輯：路線 -> 對應的預設 Bay ID
                 default_parking: "park_mountain",
                 layout: [
-                    { title: "營運車坑 (Operational)", bays: [
+                    { title: "營運車坑", bays: [
                         { id: "bay_14B", name: "14B 坑", cap: 3, type: "route", routes: ["14B"] },
                         { id: "bay_215X", name: "215X 坑", cap: 3, type: "route", routes: ["215X"] },
                         { id: "bay_16L", name: "16 孖坑(左)", cap: 3, type: "route", routes: ["16"] },
-                        { id: "bay_16R", name: "16 孖坑(右)", cap: 3, type: "route", routes: [] }, // 16號後備
-                        { id: "bay_216M", name: "216M 通道 (只限落客)", cap: 0, type: "no_parking", routes: [] }
+                        { id: "bay_16R", name: "16 孖坑(右)", cap: 3, type: "route", routes: [] },
+                        { id: "bay_216M", name: "216M 通道", cap: 0, type: "no_parking", routes: [] }
                     ]},
-                    { title: "臨時泊位 (Parking)", bays: [
+                    { title: "臨時泊位", bays: [
                         { id: "park_mountain", name: "山邊通道", cap: 4, type: "park", routes: [] },
                         { id: "park_14B_back", name: "14B 後凹位", cap: 2, type: "park", routes: [] },
                         { id: "park_narrow", name: "窄角位", cap: 1, type: "park", routes: [] },
@@ -107,121 +100,144 @@
                 name: "屯門市中心總站 (Demo)",
                 default_parking: "park_middle",
                 layout: [
-                    { title: "往九龍方向 (Kln Bound)", bays: [
-                        { id: "tm_bay_60x", name: "60X 往佐敦", cap: 5, type: "route", routes: ["60X"] },
-                        { id: "tm_bay_61x", name: "61X 往九龍城", cap: 4, type: "route", routes: ["61X"] },
-                        { id: "tm_bay_62x", name: "62X/259D", cap: 4, type: "route", routes: ["62X", "259D"] },
-                        { id: "tm_bay_e33", name: "E33 機場", cap: 6, type: "route", routes: ["E33"] }
+                    { title: "九龍方向", bays: [
+                        { id: "bay_60x", name: "60X", cap: 5, type: "route", routes: ["60X"] },
+                        { id: "bay_61x", name: "61X", cap: 4, type: "route", routes: ["61X"] },
+                        { id: "bay_62x", name: "62X", cap: 4, type: "route", routes: ["62X"] }
                     ]},
                     { title: "泊車區", bays: [
-                        { id: "park_middle", name: "中間泊位", cap: 10, type: "park", routes: [] },
-                        { id: "park_side", name: "路邊泊位", cap: 3, type: "park", routes: [] }
+                        { id: "park_middle", name: "中間泊位", cap: 10, type: "park", routes: [] }
                     ]}
                 ]
             }
         };
 
-        // --- 全域變數 ---
+        // ================= 全域變數 =================
         let currentTerminalId = null;
         let currentTerminalData = null;
         let activeTimers = {};
         let busCount = 0;
-        let capacities = {}; // 動態由 DB 生成
+        let capacities = {};
 
-        // --- 2. 系統初始化與渲染 ---
-        
+        // ================= 初始化 =================
         window.onload = () => {
             renderTerminalList();
-            // PWA Service Worker 註冊
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('sw.js')
-                    .then(() => console.log('PWA Service Worker Registered'));
-            }
+            if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
             startClock();
         };
 
+        // ================= API 核心函數 =================
+        async function callApi(method, payload) {
+            const statusEl = document.getElementById('api-status');
+            statusEl.innerText = "Syncing...";
+            statusEl.className = "text-[10px] text-yellow-400 animate-pulse";
+
+            try {
+                if (method === 'GET') {
+                    const res = await fetch(`${API_URL}?op=${payload.op}&terminal_id=${payload.terminal_id}`);
+                    statusEl.innerText = "Data Loaded";
+                    statusEl.className = "text-[10px] text-green-500";
+                    return await res.json();
+                } else {
+                    // Google Apps Script POST 使用 no-cors 模式
+                    await fetch(API_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify(payload)
+                    });
+                    statusEl.innerText = "Saved";
+                    statusEl.className = "text-[10px] text-green-500";
+                    return { status: 'success' };
+                }
+            } catch (e) {
+                console.error("API Error:", e);
+                statusEl.innerText = "Sync Error";
+                statusEl.className = "text-[10px] text-red-500 font-bold";
+            }
+        }
+
+        // ================= 介面渲染與資料載入 =================
         function renderTerminalList() {
             const list = document.getElementById('terminal-list');
             list.innerHTML = '';
             for (let [key, data] of Object.entries(SERVER_DB)) {
                 const btn = document.createElement('button');
                 btn.className = "w-full bg-slate-700 hover:bg-slate-600 border border-slate-500 p-4 rounded-xl text-left flex justify-between items-center transition group";
-                btn.innerHTML = `
-                    <span class="font-bold text-lg group-hover:text-white">${data.name}</span>
-                    <span class="bg-red-600 text-xs px-2 py-1 rounded text-white">進入 &rarr;</span>
-                `;
+                btn.innerHTML = `<span class="font-bold text-lg group-hover:text-white">${data.name}</span><span class="bg-red-600 text-xs px-2 py-1 rounded text-white">進入 &rarr;</span>`;
                 btn.onclick = () => loadTerminal(key);
                 list.appendChild(btn);
             }
         }
 
-        function loadTerminal(id) {
-            // 清空舊資料
+        async function loadTerminal(id) {
             if(Object.keys(activeTimers).length > 0 && !confirm("切換總站將清除當前操作，確定嗎？")) return;
             
-            // 重置狀態
+            // 重置
             activeTimers = {};
-            document.getElementById('monitor_list').innerHTML = `<p id="empty_msg" class="text-slate-500 italic text-center py-10">暫無計時車輛</p>`;
-            
+            document.getElementById('monitor_list').innerHTML = `<p class="text-center text-yellow-400 py-10 animate-pulse">正在從 Google Sheet 載入...</p>`;
             currentTerminalId = id;
             currentTerminalData = SERVER_DB[id];
-            capacities = {}; // 重置容量表
+            capacities = {};
+            busCount = 0;
 
-            // 更新 UI
             document.getElementById('current-terminal-name').innerText = currentTerminalData.name;
             document.getElementById('terminal-modal').style.display = 'none';
 
-            // 動態渲染 HTML
+            // 1. 渲染車坑
             const container = document.getElementById('layout-container');
             container.innerHTML = '';
-
             currentTerminalData.layout.forEach(section => {
                 const secHtml = document.createElement('section');
                 secHtml.innerHTML = `<h2 class="text-lg font-bold mb-3 text-blue-400 font-mono border-l-4 border-blue-500 pl-2">${section.title}</h2>`;
-                
                 const grid = document.createElement('div');
                 grid.className = "bay-grid";
-
                 section.bays.forEach(bay => {
-                    // 註冊容量
                     capacities[bay.id] = bay.cap;
-
                     const bayDiv = document.createElement('div');
                     bayDiv.id = bay.id;
                     bayDiv.className = "bg-slate-800 p-4 rounded-xl border-2 border-slate-700 transition-colors";
-                    
-                    // 處理禁止泊車樣式
                     if (bay.type === 'no_parking') {
-                        bayDiv.innerHTML = `
-                            <div class="flex items-center justify-between text-red-400 font-bold">
-                                <span>${bay.name}</span>
-                                <span class="text-[10px] border border-red-500 px-1 rounded animate-pulse">NO PARKING</span>
-                            </div>`;
-                        // 不加入 drop event
+                        bayDiv.innerHTML = `<div class="flex items-center justify-between text-red-400 font-bold"><span>${bay.name}</span><span class="text-[10px] border border-red-500 px-1 rounded animate-pulse">NO PARKING</span></div>`;
                     } else {
                         bayDiv.setAttribute('ondrop', 'drop(event)');
                         bayDiv.setAttribute('ondragover', 'allowDrop(event)');
-                        bayDiv.innerHTML = `
-                            <h3 class="font-bold mb-3 text-slate-300 text-sm border-b border-slate-700 pb-1 flex justify-between">
-                                <span>${bay.name}</span>
-                                <span class="text-xs text-slate-500">(0/${bay.cap})</span>
-                            </h3>
-                            <div class="space-y-3 min-h-[100px]"></div>
-                        `;
+                        bayDiv.innerHTML = `<h3 class="font-bold mb-3 text-slate-300 text-sm border-b border-slate-700 pb-1 flex justify-between"><span>${bay.name}</span><span class="text-xs text-slate-500">(0/${bay.cap})</span></h3><div class="space-y-3 min-h-[100px]"></div>`;
                     }
                     grid.appendChild(bayDiv);
                 });
                 secHtml.appendChild(grid);
                 container.appendChild(secHtml);
             });
+
+            // 2. 從 API 載入車輛
+            try {
+                const buses = await callApi('GET', { op: 'get_buses', terminal_id: id });
+                document.getElementById('monitor_list').innerHTML = '';
+                
+                buses.forEach(b => {
+                    const numId = parseInt(b.id.replace('bus_', ''));
+                    if (numId > busCount) busCount = numId; // 同步 ID 計數
+                    
+                    createBusCard(b.id, b.plate, b.route, b.run_route, b.duty, b.driver, b.etd, b.bay_id, true);
+                    
+                    // 恢復計時器
+                    if (b.status !== 'normal' && b.timer_end) {
+                        const endTime = new Date(b.timer_end);
+                        const now = new Date();
+                        const diffMins = Math.ceil((endTime - now) / 60000);
+                        if (diffMins > 0) {
+                            startTimer(b.id, diffMins, b.status === 'meal' ? 'meal' : 'break', false);
+                        }
+                    }
+                });
+                if (buses.length === 0) document.getElementById('monitor_list').innerHTML = `<p id="empty_msg" class="text-slate-500 italic text-center py-10">暫無計時車輛</p>`;
+            } catch (e) {
+                alert("無法連接資料庫，請檢查網絡");
+            }
         }
 
-        function showTerminalModal() {
-            document.getElementById('terminal-modal').style.display = 'flex';
-        }
-
-        // --- 3. 核心邏輯 (v7 功能移植) ---
-
+        // ================= 巴士操作邏輯 =================
         function checkPlateExists(plate, excludeId = null) {
             const allBuses = document.querySelectorAll('.bus-card');
             for (let bus of allBuses) {
@@ -232,7 +248,6 @@
 
         function submitBusForm() {
             if (!currentTerminalId) return alert("請先選擇總站");
-
             const plate = document.getElementById('in_plate').value.toUpperCase().trim();
             const route = document.getElementById('in_route').value.toUpperCase().trim();
             const duty = document.getElementById('in_duty').value.toUpperCase().trim();
@@ -246,10 +261,8 @@
             busCount++;
             const id = `bus_${busCount}`;
 
-            // *** 智能分流邏輯 ***
-            let targetId = currentTerminalData.default_parking; // 預設位置
-            
-            // 遍歷所有車坑，尋找匹配的路線
+            // 智能分流
+            let targetId = currentTerminalData.default_parking;
             outerLoop:
             for (const section of currentTerminalData.layout) {
                 for (const bay of section.bays) {
@@ -260,20 +273,26 @@
                 }
             }
 
-            createBusCard(id, plate, route, run_route, duty, driver, etd, targetId);
-            
-            // 清空輸入
+            // 1. 畫面建立 (Optimistic UI)
+            createBusCard(id, plate, route, run_route, duty, driver, etd, targetId, false);
+
+            // 2. 背景寫入 DB
+            callApi('POST', {
+                action: 'add',
+                id: id, terminal_id: currentTerminalId, bay_id: targetId,
+                plate: plate, route: route, run_route: run_route,
+                duty: duty, driver: driver, etd: etd
+            });
+
             ['in_plate','in_duty','in_etd','in_run_route','in_driver'].forEach(i => document.getElementById(i).value = "");
         }
 
-        function createBusCard(id, plate, route, run_route, duty, driver, etd, targetId) {
+        function createBusCard(id, plate, route, run_route, duty, driver, etd, targetId, isLoadMode) {
             const html = `
                 <div id="${id}" draggable="true" ondragstart="drag(event)" class="bus-card status-normal p-3 rounded shadow-lg" 
                      data-plate="${plate}" data-route="${route}" data-run="${run_route}" data-duty="${duty}" data-driver="${driver}" data-etd="${etd}">
                     <div class="flex justify-between items-start mb-1">
-                        <div class="font-black text-xl tracking-tight editable" onclick="editField('${id}', 'plate')">
-                             <span id="${id}_plate_val">${plate}</span>
-                        </div>
+                        <div class="font-black text-xl tracking-tight editable" onclick="editField('${id}', 'plate')"><span id="${id}_plate_val">${plate}</span></div>
                         <div class="text-right">
                             <div class="bg-red-600 text-white px-2 py-0.5 rounded text-[11px] font-black italic">行:${run_route}</div>
                             <div class="text-[9px] font-bold text-slate-500 mt-0.5">線:${route}</div>
@@ -284,9 +303,7 @@
                         <span class="editable" onclick="editField('${id}', 'driver')">車長: <span id="${id}_driver_val">${driver}</span></span>
                     </div>
                     <div class="flex justify-between items-center">
-                        <span class="text-[10px] font-bold text-slate-500 editable" onclick="editField('${id}', 'etd')">
-                            開車: <span id="${id}_etd_val" class="text-blue-700">${etd}</span>
-                        </span>
+                        <span class="text-[10px] font-bold text-slate-500 editable" onclick="editField('${id}', 'etd')">開車: <span id="${id}_etd_val" class="text-blue-700">${etd}</span></span>
                         <div id="${id}_finish_time" class="text-[10px] font-black text-red-600"></div>
                     </div>
                     <div id="${id}_timer_box" class="hidden mt-2 text-center text-[11px] font-black py-1 rounded bg-black/5"></div>
@@ -296,45 +313,33 @@
                         <button onclick="removeBus('${id}')" class="px-2 text-[9px] bg-slate-200 text-slate-600 py-1 rounded font-bold">出站</button>
                     </div>
                 </div>`;
-
+            
             const targetBay = document.getElementById(targetId);
-            if (targetBay) {
+            if(targetBay) {
                 targetBay.querySelector('div').insertAdjacentHTML('beforeend', html);
                 updateCounts();
-            } else {
-                alert("錯誤：找不到目標車坑 ID " + targetId);
             }
         }
 
-        // --- 拖放與編輯功能 (保留 v7) ---
+        // ================= 拖放與事件 =================
         function allowDrop(e) { e.preventDefault(); }
         function drag(e) { e.dataTransfer.setData("text", e.target.id); }
+        
         function drop(e) {
             e.preventDefault();
-            const data = e.dataTransfer.getData("text");
+            const busId = e.dataTransfer.getData("text");
             let t = e.target;
             while (t && !capacities.hasOwnProperty(t.id)) t = t.parentElement;
+            
             if (t && capacities.hasOwnProperty(t.id)) { 
-                t.querySelector('div').appendChild(document.getElementById(data)); 
+                t.querySelector('div').appendChild(document.getElementById(busId)); 
                 updateCounts(); 
+                // DB Update
+                callApi('POST', { action: 'update', id: busId, bay_id: t.id });
             }
         }
 
-        function updateCounts() {
-            for (let id in capacities) {
-                const el = document.getElementById(id);
-                if (!el) continue;
-                const count = el.querySelector('div').children.length;
-                const h3Span = el.querySelector('h3 span:last-child');
-                if(h3Span) h3Span.innerText = `(${count}/${capacities[id]})`;
-                
-                el.classList.toggle('bg-red-900/20', count > capacities[id] && capacities[id] > 0);
-                el.classList.toggle('border-red-500', count > capacities[id] && capacities[id] > 0);
-            }
-        }
-
-        // --- 計時器與編輯邏輯 (同 v7) ---
-        function startTimer(id, mins, type) {
+        function startTimer(id, mins, type, syncToDb = true) {
             const bus = document.getElementById(id);
             const typeText = type === 'meal' ? '用膳' : '小休';
             const now = new Date();
@@ -356,12 +361,15 @@
                 if (seconds <= 0) {
                     clearInterval(activeTimers[id].interval);
                     timerBox.innerText = "時間完成";
-                    // 播放聲音提示 (可選)
                 }
                 seconds--;
             };
             activeTimers[id] = { interval: setInterval(updateUI, 1000), plate: bus.dataset.plate, run: bus.dataset.run };
             updateUI();
+
+            if (syncToDb) {
+                callApi('POST', { action: 'update', id: id, status: type, timer_end: finishDate.toISOString() });
+            }
         }
 
         function updateMonitor(id, type, timeStr, finishStr, isDone) {
@@ -399,11 +407,16 @@
             bus.remove();
             if (Object.keys(activeTimers).length === 0) document.getElementById('empty_msg').classList.remove('hidden');
             updateCounts();
+            
+            // DB Delete
+            callApi('POST', { action: 'delete', id: id });
         }
 
         function editField(id, field) {
             const bus = document.getElementById(id);
             let newVal;
+            let updatePayload = { action: 'update', id: id };
+
             if (field === 'plate') {
                 newVal = prompt("修改車牌號碼:", bus.dataset.plate).toUpperCase().trim();
                 if (newVal && newVal !== bus.dataset.plate) {
@@ -411,21 +424,40 @@
                     bus.dataset.plate = newVal;
                     document.getElementById(`${id}_plate_val`).innerText = newVal;
                     if(activeTimers[id]) activeTimers[id].plate = newVal;
-                }
+                    updatePayload.plate = newVal;
+                } else return;
             } else if (field === 'driver') {
                 newVal = prompt("修改車長編號:", bus.dataset.driver).trim();
                 if (newVal) {
                     bus.dataset.driver = newVal;
                     document.getElementById(`${id}_driver_val`).innerText = newVal;
-                }
+                    updatePayload.driver = newVal;
+                } else return;
             } else if (field === 'etd') {
                 newVal = prompt("修改預計開車時間 (HH:mm):", bus.dataset.etd).trim();
                 if (newVal && /^([01]\d|2[0-3]):?([0-5]\d)$/.test(newVal)) {
                     bus.dataset.etd = newVal;
                     document.getElementById(`${id}_etd_val`).innerText = newVal;
-                }
+                    updatePayload.etd = newVal;
+                } else return;
+            }
+            // DB Update
+            callApi('POST', updatePayload);
+        }
+
+        function updateCounts() {
+            for (let id in capacities) {
+                const el = document.getElementById(id);
+                if (!el) continue;
+                const count = el.querySelector('div').children.length;
+                const h3Span = el.querySelector('h3 span:last-child');
+                if(h3Span) h3Span.innerText = `(${count}/${capacities[id]})`;
+                el.classList.toggle('bg-red-900/20', count > capacities[id] && capacities[id] > 0);
+                el.classList.toggle('border-red-500', count > capacities[id] && capacities[id] > 0);
             }
         }
+
+        function showTerminalModal() { document.getElementById('terminal-modal').style.display = 'flex'; }
 
         function startClock() {
             setInterval(() => {
@@ -433,11 +465,9 @@
                 const timeStr = now.toLocaleTimeString('zh-HK', { hour12: false });
                 document.getElementById('clock').innerText = timeStr;
                 const shortTime = timeStr.substring(0, 5);
-
                 document.querySelectorAll('.bus-card').forEach(bus => {
                     const etd = bus.dataset.etd;
                     if (etd !== "--:--" && etd === shortTime) removeBus(bus.id, true);
-                    
                     const [h, m] = etd.split(':').map(Number);
                     const etdDate = new Date(); etdDate.setHours(h, m, 0);
                     const diff = (etdDate - now) / 60000;
