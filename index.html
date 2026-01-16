@@ -90,7 +90,6 @@
 
     <script>
         // ================= 配置設定 =================
-        // 請確保此處為已更新過 doGet 函數的 Apps Script URL
         const API_URL = "https://script.google.com/macros/s/AKfycbzRo6udEvwQEDun8MuCnwE4x6neIss47qMajyJu0FpJItW6EG_72ExxQvuzC8QN8VGF/exec";
         
         let SERVER_DB = {}; 
@@ -137,7 +136,6 @@
             document.getElementById('current-terminal-name').innerText = currentTerminalData.name;
             document.getElementById('terminal-modal').style.display = 'none';
 
-            // ★ 地圖按鈕控制：如果該總站有設定 layout_img，則顯示按鈕
             const mapBtn = document.getElementById('btn-show-map');
             if (currentTerminalData.layout_img) {
                 mapBtn.classList.remove('hidden');
@@ -148,7 +146,6 @@
                 mapBtn.classList.remove('flex');
             }
 
-            // 渲染佈局
             const container = document.getElementById('layout-container');
             container.innerHTML = '';
             currentTerminalData.layout.forEach(section => {
@@ -174,14 +171,14 @@
                 container.appendChild(secHtml);
             });
 
-            // 載入車輛
             try {
                 const buses = await callApi('GET', { op: 'get_buses', terminal_id: id });
                 document.getElementById('monitor_list').innerHTML = '';
                 buses.forEach(b => {
                     const numId = parseInt(b.id.replace('bus_', ''));
                     if (numId > busCount) busCount = numId;
-                    createBusCard(b.id, b.plate, b.route, b.run_route, b.duty, b.driver, b.etd, b.bay_id, true);
+                    // 注意：這裡加入了 b.arrival_time
+                    createBusCard(b.id, b.plate, b.route, b.run_route, b.duty, b.driver, b.etd, b.bay_id, true, b.arrival_time);
                     if (b.status !== 'normal' && b.timer_end) {
                         const endTime = new Date(b.timer_end);
                         const now = new Date();
@@ -224,7 +221,7 @@
             }
         }
 
-        // ================= 輔助功能與邏輯 (保留不變) =================
+        // ================= 輔助功能與邏輯 =================
         function renderTerminalList() {
             const list = document.getElementById('terminal-list');
             list.innerHTML = '';
@@ -266,15 +263,37 @@
                 }
             }
 
-            createBusCard(id, plate, route, run_route, duty, driver, etd, targetId, false);
-            callApi('POST', { action: 'add', id: id, terminal_id: currentTerminalId, bay_id: targetId, plate: plate, route: route, run_route: run_route, duty: duty, driver: driver, etd: etd });
+            // 新增：取得當前時間作為到站時間
+            const now = new Date();
+            const arrivalTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+            createBusCard(id, plate, route, run_route, duty, driver, etd, targetId, false, arrivalTime);
+            
+            // 新增：傳送 arrival_time 到後端
+            callApi('POST', { 
+                action: 'add', 
+                id: id, 
+                terminal_id: currentTerminalId, 
+                bay_id: targetId, 
+                plate: plate, 
+                route: route, 
+                run_route: run_route, 
+                duty: duty, 
+                driver: driver, 
+                etd: etd,
+                arrival_time: arrivalTime
+            });
             ['in_plate','in_duty','in_etd','in_run_route','in_driver'].forEach(i => document.getElementById(i).value = "");
         }
 
-        function createBusCard(id, plate, route, run_route, duty, driver, etd, targetId, isLoadMode) {
+        // 修改：新增 arrivalTime 參數
+        function createBusCard(id, plate, route, run_route, duty, driver, etd, targetId, isLoadMode, arrivalTime) {
+            // 如果沒有 arrivalTime (例如舊資料)，給個預設值或空字串
+            const arrivalDisplay = arrivalTime || "--:--";
+
             const html = `
                 <div id="${id}" draggable="true" ondragstart="drag(event)" class="bus-card status-normal p-3 rounded shadow-lg" 
-                     data-plate="${plate}" data-route="${route}" data-run="${run_route}" data-duty="${duty}" data-driver="${driver}" data-etd="${etd}">
+                     data-plate="${plate}" data-route="${route}" data-run="${run_route}" data-duty="${duty}" data-driver="${driver}" data-etd="${etd}" data-arrival="${arrivalDisplay}">
                     <div class="flex justify-between items-start mb-1">
                         <div class="font-black text-xl tracking-tight editable" onclick="editField('${id}', 'plate')"><span id="${id}_plate_val">${plate}</span></div>
                         <div class="text-right">
@@ -286,11 +305,12 @@
                         <span>字軌: ${duty}</span> 
                         <span class="editable" onclick="editField('${id}', 'driver')">車長: <span id="${id}_driver_val">${driver}</span></span>
                     </div>
-                    <div class="flex justify-between items-center">
+                    <div class="flex justify-between items-center mb-1">
+                         <span class="text-[10px] text-slate-500 font-bold">到站: ${arrivalDisplay}</span>
                         <span class="text-[10px] font-bold text-slate-500 editable" onclick="editField('${id}', 'etd')">開車: <span id="${id}_etd_val" class="text-blue-700">${etd}</span></span>
-                        <div id="${id}_finish_time" class="text-[10px] font-black text-red-600"></div>
                     </div>
-                    <div id="${id}_timer_box" class="hidden mt-2 text-center text-[11px] font-black py-1 rounded bg-black/5"></div>
+                     <div id="${id}_finish_time" class="text-[10px] font-black text-red-600 text-right h-4"></div>
+                    <div id="${id}_timer_box" class="hidden mt-1 text-center text-[11px] font-black py-1 rounded bg-black/5"></div>
                     <div class="mt-2 flex gap-1">
                         <button onclick="startTimer('${id}', 60, 'meal')" class="flex-1 text-[9px] bg-orange-500 text-white py-1 rounded font-bold">用膳</button>
                         <button onclick="startTimer('${id}', 40, 'break')" class="flex-1 text-[9px] bg-purple-500 text-white py-1 rounded font-bold">小休</button>
